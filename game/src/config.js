@@ -33,8 +33,8 @@ export const EBULLET = { radius: 6, speed: 265, pool: 160 };
 
 export const ENEMY = {
   pool: 96,
-  // Asteroid: a slow tumbling rock, 3 hits.
-  asteroid: { size: 64, hp: 3, speed: 92, score: 20 },
+  // Asteroid: a slow tumbling rock, 3 hits. A big one splits into two fast minis when it breaks.
+  asteroid: { size: 64, hp: 3, speed: 92, score: 20, miniSize: 34, miniHp: 1, miniSpeed: 175, miniScore: 10 },
   // Drone: sine-drifts down the field and shoots back from wave 2 on, 1 hit.
   drone: { size: 40, hp: 1, speed: 138, score: 50, fireInterval: 2.6 },
   // Weaver: fast zigzag, 2 hits, from wave 3 on.
@@ -52,7 +52,12 @@ export const POWER = {
   pool: 12,
   droneDropChance: 0.16,
   weaverDropChance: 0.22,
+  magnetRadius: 200,
+  magnetPull: 360,
 };
+
+/** Carrier-kill upgrades: each one the player takes moves its dial by one step. */
+export const UPGRADE = { fireStep: 0.12, fireMax: 1.6, scoreBonus: 500 };
 
 export const PARTICLE = { pool: 320 };
 

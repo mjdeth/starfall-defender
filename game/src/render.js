@@ -11,6 +11,7 @@ export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
 export const SCREEN_PAUSED = 'paused';
 export const SCREEN_OVER = 'over';
+export const SCREEN_CHOICE = 'choice';
 
 const PANEL = { width: 680, top: 150, line: 36, bottom: 76 };
 
@@ -221,7 +222,13 @@ export function createRenderer(canvas) {
     if (!player.alive) return;
     if (player.invulnerable > 0 && Math.floor(player.invulnerable * 12) % 2 === 1) return;
     const cx = player.x + player.width / 2;
+    const cy = player.y + player.height / 2;
     const bottom = player.y + player.height;
+    // Hull and flame lean into the turn: the bank angle the world eased toward the input.
+    context.save();
+    context.translate(cx, cy);
+    context.rotate(player.bank * 0.26);
+    context.translate(-cx, -cy);
     // Engine flame, flickering with the run's own clock so replays match.
     const flame = 12 + 7 * Math.sin(state.elapsed * 41) + 4 * Math.sin(state.elapsed * 97);
     context.beginPath();
@@ -247,6 +254,7 @@ export function createRenderer(canvas) {
     context.beginPath();
     context.ellipse(cx, player.y + 16, 5, 9, 0, 0, Math.PI * 2);
     context.fill();
+    context.restore();
     if (player.rapid > 0) {
       context.fillStyle = PALETTE.rapid;
       context.fillRect(cx - player.width / 2 - 3, player.y + 24, 5, 10);
@@ -446,13 +454,46 @@ export function createRenderer(canvas) {
     'Move: ← ↑ ↓ → or WASD · Fire: hold Space · Pause: P · Sound: M',
     'Catch shield, rapid-fire, spread-shot and spare hulls as they fall.',
     'Chain kills to raise your multiplier. A hit resets it.',
+    'Fell the carrier and choose an upgrade for the run.',
     '',
   ];
   const PAUSED_LINES = ['The swarm will wait for you.'];
   const OVER_LINES = ['', ''];
 
-  /** Paint one frame: the field, then the HUD or a panel for the screen the game is on. */
-  function draw(state, screen, best) {
+  function drawChoice(choice) {
+    const width = 760;
+    const height = 340;
+    const x = (FIELD.width - width) / 2;
+    const y = (FIELD.height - height) / 2;
+    context.fillStyle = PALETTE.panel;
+    context.fillRect(x, y, width, height);
+    context.strokeStyle = PALETTE.panelEdge;
+    context.lineWidth = 2;
+    context.strokeRect(x, y, width, height);
+    context.textBaseline = 'alphabetic';
+    text('CARRIER DOWN', FIELD.width / 2, y + 74, 44, PALETTE.accent, 'center', '800');
+    text('Choose an upgrade for this run', FIELD.width / 2, y + 112, 20, PALETTE.muted, 'center');
+    for (let i = 0; i < 2; i += 1) {
+      const option = choice.options[i];
+      const boxW = 320;
+      const boxH = 118;
+      const boxX = x + 36 + i * (boxW + 48);
+      const boxY = y + 140;
+      const picked = choice.selected === i;
+      context.fillStyle = picked ? 'rgba(45, 226, 230, 0.14)' : 'rgba(255, 255, 255, 0.04)';
+      context.fillRect(boxX, boxY, boxW, boxH);
+      context.strokeStyle = picked ? PALETTE.accent : PALETTE.muted;
+      context.lineWidth = picked ? 3 : 1;
+      context.strokeRect(boxX, boxY, boxW, boxH);
+      text(`${i + 1} · ${option.name}`, boxX + boxW / 2, boxY + 48, 23, PALETTE.text, 'center', '700');
+      text(option.desc, boxX + boxW / 2, boxY + 84, 17, PALETTE.muted, 'center');
+    }
+    text('← → choose · Space to take it', FIELD.width / 2, y + height - 30, 19, PALETTE.accent, 'center', '700');
+  }
+
+  /** Paint one frame: the field, then the HUD or a panel for the screen the game is on.
+   * `choice` carries the upgrade offer ({options, selected}) on the choice screen only. */
+  function draw(state, screen, best, choice) {
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.fillStyle = PALETTE.backdrop;
     context.fillRect(0, 0, canvas.width, canvas.height);
@@ -465,12 +506,13 @@ export function createRenderer(canvas) {
     context.setTransform(view.scale, 0, 0, view.scale, view.x + shakeX * view.scale, view.y + shakeY * view.scale);
     drawField(state);
     if (screen === SCREEN_TITLE) {
-      TITLE_LINES[4] = bestLabel(best);
+      TITLE_LINES[5] = bestLabel(best);
       drawPanel('STARFALL DEFENDER', TITLE_LINES, 'Press Space or tap to launch', PALETTE.accent);
       return;
     }
     drawHud(state);
     if (screen === SCREEN_PAUSED) drawPanel('PAUSED', PAUSED_LINES, 'Press P to resume');
+    else if (screen === SCREEN_CHOICE && choice) drawChoice(choice);
     else if (screen === SCREEN_OVER) {
       OVER_LINES[0] = finalLabel(state.score);
       OVER_LINES[1] = bestLabel(best);

@@ -4,7 +4,7 @@
 // flags, so the caller can react (sound, announcements) without the world knowing about either.
 // All randomness comes from the seeded generator handed in, so a seed always replays the same
 // game. Pools are allocated once at createWorld; nothing allocates per frame after that.
-import { BULLET, COMBO, EBULLET, ENEMY, FIELD, LIVES, PARTICLE, PLAYER, POWER, STAR, WAVE } from './config.js';
+import { BULLET, COMBO, EBULLET, ENEMY, FIELD, LIVES, PARTICLE, PLAYER, POWER, STAR, UPGRADE, WAVE } from './config.js';
 
 export const KIND_ASTEROID = 0;
 export const KIND_DRONE = 1;
@@ -26,6 +26,12 @@ export const EVENT_SHOOT = 32;
 export const EVENT_BOSS = 64;
 export const EVENT_MULT = 128;
 
+/** The upgrades offered after a carrier kill; applyUpgrade below gives them effect. */
+export const UP_FIRE = 0;
+export const UP_LIFE = 1;
+export const UP_MAGNET = 2;
+export const UP_SCORE = 3;
+
 function overlaps(a, b, shrink) {
   return a.x + shrink < b.x + b.width - shrink && a.x + a.width - shrink > b.x + shrink &&
          a.y + shrink < b.y + b.height - shrink && a.y + a.height - shrink > b.y + shrink;
@@ -34,7 +40,7 @@ function overlaps(a, b, shrink) {
 export function createWorld(random) {
   const player = {
     x: 0, y: 0, width: PLAYER.width, height: PLAYER.height,
-    invulnerable: 0, shield: 0, rapid: 0, spread: 0, fireTimer: 0, alive: true,
+    invulnerable: 0, shield: 0, rapid: 0, spread: 0, fireTimer: 0, alive: true, bank: 0,
   };
   const bullets = [];
   for (let i = 0; i < BULLET.pool; i += 1) bullets.push({ active: false, x: 0, y: 0, vx: 0, vy: 0, width: BULLET.width, height: BULLET.height });
@@ -46,7 +52,7 @@ export function createWorld(random) {
       active: false, kind: KIND_ASTEROID, x: 0, y: 0, width: 0, height: 0, hp: 1, maxHp: 1,
       vx: 0, vy: 0, t: 0, phase: 0, fireTimer: 0, burstTimer: 0, droneTimer: 0, dir: 1,
       shape: [1, 1, 1, 1, 1, 1, 1, 1], spin: 0, rot: 0,
-      dive: 0, dvx: 0, dvy: 0, tier: 1, burstEvery: 0, strafe: 120,
+      dive: 0, dvx: 0, dvy: 0, tier: 1, burstEvery: 0, strafe: 120, mini: false,
     });
   }
   const powerups = [];
@@ -63,6 +69,7 @@ export function createWorld(random) {
     score: 0, lives: LIVES, wave: 0, elapsed: 0,
     toSpawn: 0, spawnTimer: 0, waveTimer: WAVE.bannerSeconds, bossAlive: false, shake: 0,
     combo: 0, comboTimer: 0, multiplier: 1, trailTick: 0,
+    fireScale: 1, magnet: false, formation: 0, formationPhase: 0,
   };
 
   function reset() {
@@ -90,6 +97,11 @@ export function createWorld(random) {
     state.comboTimer = 0;
     state.multiplier = 1;
     state.trailTick = 0;
+    state.fireScale = 1;
+    state.magnet = false;
+    state.formation = 0;
+    state.formationPhase = 0;
+    player.bank = 0;
   }
 
   function freeOf(pool) {
@@ -124,12 +136,13 @@ export function createWorld(random) {
 
   function spawnEnemy(kind) {
     const e = freeOf(enemies);
-    if (e === null) return;
+    if (e === null) return null;
     const scale = speedScale();
     e.active = true;
     e.kind = kind;
     e.t = 0;
     e.dive = 0;
+    e.mini = false;
     e.phase = random() * Math.PI * 2;
     e.fireTimer = ENEMY.drone.fireInterval * (0.6 + random() * 0.8);
     if (kind === KIND_ASTEROID) {
@@ -185,6 +198,29 @@ export function createWorld(random) {
       e.droneTimer = s.droneInterval;
       state.bossAlive = true;
     }
+    return e;
+  }
+
+  /** One half of a split asteroid: small, quick, worth less, and it does not split again. */
+  function spawnMini(cx, cy, dirSign) {
+    const e = freeOf(enemies);
+    if (e === null) return;
+    const s = ENEMY.asteroid;
+    e.active = true;
+    e.kind = KIND_ASTEROID;
+    e.mini = true;
+    e.t = 0;
+    e.dive = 0;
+    e.width = s.miniSize;
+    e.height = s.miniSize;
+    e.hp = e.maxHp = s.miniHp;
+    e.x = cx - s.miniSize / 2;
+    e.y = cy - s.miniSize / 2;
+    e.vx = dirSign * (70 + random() * 60);
+    e.vy = s.miniSpeed * (0.85 + random() * 0.4);
+    e.spin = (random() - 0.5) * 3.2;
+    e.rot = random() * Math.PI * 2;
+    for (let k = 0; k < 8; k += 1) e.shape[k] = 0.78 + random() * 0.34;
   }
 
   function startWave() {
@@ -193,9 +229,14 @@ export function createWorld(random) {
     if (state.wave % 5 === 0) {
       spawnEnemy(KIND_CARRIER);
       state.toSpawn = 0;
+      state.formation = 0;
     } else {
       state.toSpawn = WAVE.baseCount + WAVE.perWave * (state.wave - 1);
       state.spawnTimer = 0.2;
+      // Every third wave opens with five drones in a V, one shared drift phase so the
+      // formation holds together as it crosses the field.
+      state.formation = state.wave % 3 === 0 ? 5 : 0;
+      state.formationPhase = random() * Math.PI * 2;
     }
   }
 
@@ -248,8 +289,12 @@ export function createWorld(random) {
     const cy = e.y + e.height / 2;
     let base = 0;
     if (e.kind === KIND_ASTEROID) {
-      base = ENEMY.asteroid.score;
-      explode(cx, cy, 12, 30);
+      base = e.mini ? ENEMY.asteroid.miniScore : ENEMY.asteroid.score;
+      explode(cx, cy, e.mini ? 8 : 12, 30);
+      if (!e.mini) {
+        spawnMini(cx, cy, -1);
+        spawnMini(cx, cy, 1);
+      }
     } else if (e.kind === KIND_DRONE) {
       base = ENEMY.drone.score;
       explode(cx, cy, 14, 18);
@@ -368,9 +413,23 @@ export function createWorld(random) {
     } else if (state.toSpawn > 0) {
       state.spawnTimer -= dt;
       if (state.spawnTimer <= 0) {
-        spawnEnemy(pickKind());
-        state.toSpawn -= 1;
-        state.spawnTimer = spawnInterval() * (0.7 + random() * 0.6);
+        if (state.formation > 0) {
+          // Formation drones enter together in a V: centre lowest, wings higher.
+          const slot = 5 - state.formation;
+          const e = spawnEnemy(KIND_DRONE);
+          if (e !== null) {
+            e.phase = state.formationPhase;
+            e.x = FIELD.width / 2 + (slot - 2) * 96 - e.width / 2;
+            e.y = -e.height - 8 - Math.abs(slot - 2) * 34;
+          }
+          state.formation -= 1;
+          state.toSpawn -= 1;
+          state.spawnTimer = 0.14;
+        } else {
+          spawnEnemy(pickKind());
+          state.toSpawn -= 1;
+          state.spawnTimer = spawnInterval() * (0.7 + random() * 0.6);
+        }
       }
     } else if (!state.bossAlive) {
       let anyEnemy = false;
@@ -384,6 +443,7 @@ export function createWorld(random) {
     // Player movement and timers.
     player.x = Math.min(FIELD.width - player.width, Math.max(0, player.x + controls.x * PLAYER.speed * dt));
     player.y = Math.min(FIELD.height - player.height - 8, Math.max(FIELD.height * 0.35, player.y + controls.y * PLAYER.speed * dt));
+    player.bank += (controls.x - player.bank) * Math.min(1, dt * 9);
     if (player.invulnerable > 0) player.invulnerable = Math.max(0, player.invulnerable - dt);
     if (player.shield > 0) player.shield = Math.max(0, player.shield - dt);
     if (player.rapid > 0) player.rapid = Math.max(0, player.rapid - dt);
@@ -422,7 +482,8 @@ export function createWorld(random) {
         fired = fireBullet(PLAYER.spreadSideVx, -PLAYER.spreadVy) || fired;
       }
       if (fired) {
-        player.fireTimer = player.rapid > 0 ? PLAYER.rapidInterval : PLAYER.fireInterval;
+        const baseInterval = player.rapid > 0 ? PLAYER.rapidInterval : PLAYER.fireInterval;
+        player.fireTimer = baseInterval / state.fireScale;
         events |= EVENT_SHOOT;
       }
     }
@@ -552,10 +613,20 @@ export function createWorld(random) {
       }
     }
 
-    // Power-ups drift down; the player collects by touch.
+    // Power-ups drift down; the player collects by touch. With the magnet upgrade they
+    // also bend toward the ship once they fall within reach.
     for (const p of powerups) {
       if (!p.active) continue;
       p.t += dt;
+      if (state.magnet && player.alive) {
+        const dx = player.x + player.width / 2 - (p.x + p.width / 2);
+        const dy = player.y + player.height / 2 - (p.y + p.height / 2);
+        const dist = Math.hypot(dx, dy);
+        if (dist > 1 && dist < POWER.magnetRadius) {
+          p.x += (dx / dist) * POWER.magnetPull * dt;
+          p.y += (dy / dist) * POWER.magnetPull * dt;
+        }
+      }
       p.y += POWER.speed * dt;
       if (p.y > FIELD.height + 40) { p.active = false; continue; }
       if (player.alive && overlaps(p, player, 4)) {
@@ -571,6 +642,14 @@ export function createWorld(random) {
     return events;
   }
 
+  /** Apply one carrier-kill upgrade (UP_FIRE / UP_LIFE / UP_MAGNET / UP_SCORE). */
+  function applyUpgrade(kind) {
+    if (kind === UP_FIRE) state.fireScale = Math.min(UPGRADE.fireMax, state.fireScale + UPGRADE.fireStep);
+    else if (kind === UP_LIFE) state.lives = Math.min(6, state.lives + 1);
+    else if (kind === UP_MAGNET) state.magnet = true;
+    else state.score += UPGRADE.scoreBonus;
+  }
+
   reset();
-  return { state, reset, step };
+  return { state, reset, step, applyUpgrade };
 }

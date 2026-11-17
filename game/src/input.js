@@ -6,6 +6,8 @@
 export const ACTION_CONFIRM = 1;
 export const ACTION_PAUSE = 2;
 export const ACTION_MUTE = 4;
+export const ACTION_ONE = 8;
+export const ACTION_TWO = 16;
 
 const LEFT = new Set(['ArrowLeft', 'KeyA']);
 const RIGHT = new Set(['ArrowRight', 'KeyD']);
@@ -15,6 +17,8 @@ const FIRE = new Set(['Space', 'KeyZ', 'KeyJ']);
 const CONFIRM = new Set(['Enter']);
 const PAUSE = new Set(['KeyP', 'Escape']);
 const MUTE = new Set(['KeyM']);
+const ONE = new Set(['Digit1', 'Numpad1']);
+const TWO = new Set(['Digit2', 'Numpad2']);
 
 export function createInput(target) {
   const held = { left: false, right: false, up: false, down: false, fire: false };
@@ -39,6 +43,10 @@ export function createInput(target) {
       if (!event.repeat) actions |= ACTION_PAUSE;
     } else if (MUTE.has(event.code)) {
       if (!event.repeat) actions |= ACTION_MUTE;
+    } else if (ONE.has(event.code)) {
+      if (!event.repeat) actions |= ACTION_ONE;
+    } else if (TWO.has(event.code)) {
+      if (!event.repeat) actions |= ACTION_TWO;
     } else return;
     event.preventDefault();
   });
