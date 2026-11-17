@@ -4,8 +4,8 @@
 // a sleek fighter with a flickering engine flame, tumbling asteroids, drones, weavers and the
 // carrier, glowing bullets and explosion particles. Text that holds a number is rebuilt only
 // when the number changes, so a frame allocates nothing.
-import { FIELD, FONT, PALETTE, PLAYER } from './config.js';
-import { KIND_ASTEROID, KIND_CARRIER, KIND_DRONE, KIND_WEAVER, POW_LIFE, POW_RAPID, POW_SHIELD } from './world.js';
+import { COMBO, FIELD, FONT, PALETTE, PLAYER } from './config.js';
+import { KIND_ASTEROID, KIND_CARRIER, KIND_DRONE, KIND_STINGER, KIND_WEAVER, POW_LIFE, POW_RAPID, POW_SHIELD, POW_SPREAD } from './world.js';
 
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
@@ -157,6 +157,31 @@ export function createRenderer(canvas) {
     if (e.hp < e.maxHp) drawMiniBar(cx, e.y - 12, e.width, e.hp / e.maxHp);
   }
 
+  function drawStinger(e, elapsed) {
+    const cx = e.x + e.width / 2;
+    const cy = e.y + e.height / 2;
+    context.save();
+    context.translate(cx, cy);
+    if (e.dive === 1) context.rotate(Math.atan2(e.dvy, e.dvx) - Math.PI / 2);
+    context.beginPath();
+    context.moveTo(0, e.height / 2);
+    context.lineTo(e.width / 2, -e.height / 6);
+    context.lineTo(e.width / 5, -e.height / 2);
+    context.lineTo(-e.width / 5, -e.height / 2);
+    context.lineTo(-e.width / 2, -e.height / 6);
+    context.closePath();
+    context.fillStyle = PALETTE.stinger;
+    context.fill();
+    // About to dive, the eye strobes: the one warning the player gets.
+    const strobe = e.dive === 0 && e.t > 0.7 && Math.floor(elapsed * 10) % 2 === 0;
+    context.fillStyle = strobe ? '#ffffff' : '#3d1e00';
+    context.beginPath();
+    context.arc(0, 2, 5, 0, Math.PI * 2);
+    context.fill();
+    context.restore();
+    if (e.hp < e.maxHp) drawMiniBar(cx, e.y - 12, e.width, e.hp / e.maxHp);
+  }
+
   function drawCarrier(e, elapsed) {
     context.save();
     context.translate(e.x, e.y);
@@ -182,12 +207,13 @@ export function createRenderer(canvas) {
     context.fillStyle = PALETTE.carrierCore;
     for (let k = 0; k < 5; k += 1) context.fillRect(24 + k * 44, e.height - 14, 16, 6);
     context.restore();
-    // Boss health bar, pinned under the HUD.
+    // Boss health bar, pinned under the HUD, labelled with the carrier's mark.
     const frac = Math.max(0, e.hp / e.maxHp);
     context.fillStyle = 'rgba(255,255,255,0.15)';
     context.fillRect(FIELD.width / 2 - 260, 58, 520, 10);
     context.fillStyle = PALETTE.carrier;
     context.fillRect(FIELD.width / 2 - 260, 58, 520 * frac, 10);
+    text(e.tier > 1 ? `CARRIER MK ${e.tier}` : 'CARRIER', FIELD.width / 2 + 268, 56, 14, PALETTE.carrier, 'left', '700');
   }
 
   function drawShip(state) {
@@ -226,6 +252,11 @@ export function createRenderer(canvas) {
       context.fillRect(cx - player.width / 2 - 3, player.y + 24, 5, 10);
       context.fillRect(cx + player.width / 2 - 2, player.y + 24, 5, 10);
     }
+    if (player.spread > 0) {
+      context.fillStyle = PALETTE.spread;
+      context.fillRect(cx - player.width / 2 - 3, player.y + 12, 5, 10);
+      context.fillRect(cx + player.width / 2 - 2, player.y + 12, 5, 10);
+    }
     if (player.shield > 0) {
       const pulse = 0.55 + 0.25 * Math.sin(state.elapsed * 5);
       context.strokeStyle = PALETTE.shield;
@@ -241,7 +272,7 @@ export function createRenderer(canvas) {
   function drawPowerup(p, elapsed) {
     const cx = p.x + p.width / 2;
     const cy = p.y + p.height / 2 + Math.sin(p.t * 4) * 3;
-    const color = p.kind === POW_SHIELD ? PALETTE.shield : p.kind === POW_RAPID ? PALETTE.rapid : PALETTE.life;
+    const color = p.kind === POW_SHIELD ? PALETTE.shield : p.kind === POW_RAPID ? PALETTE.rapid : p.kind === POW_SPREAD ? PALETTE.spread : PALETTE.life;
     context.save();
     context.translate(cx, cy);
     context.strokeStyle = color;
@@ -274,6 +305,19 @@ export function createRenderer(canvas) {
       context.lineTo(1, -2);
       context.closePath();
       context.fill();
+    } else if (p.kind === POW_SPREAD) {
+      // A three-pronged fan for the triple shot.
+      context.beginPath();
+      context.moveTo(0, 10);
+      context.lineTo(-3, -2);
+      context.lineTo(-10, -9);
+      context.lineTo(-5, -10);
+      context.lineTo(0, -4);
+      context.lineTo(5, -10);
+      context.lineTo(10, -9);
+      context.lineTo(3, -2);
+      context.closePath();
+      context.fill();
     } else {
       context.fillRect(-2.5, -9, 5, 18);
       context.fillRect(-9, -2.5, 18, 5);
@@ -289,6 +333,7 @@ export function createRenderer(canvas) {
       if (e.kind === KIND_ASTEROID) drawAsteroid(e);
       else if (e.kind === KIND_DRONE) drawDrone(e, state.elapsed);
       else if (e.kind === KIND_WEAVER) drawWeaver(e);
+      else if (e.kind === KIND_STINGER) drawStinger(e, state.elapsed);
       else drawCarrier(e, state.elapsed);
     }
     // Bullets and particles glow: draw them additively.
@@ -336,6 +381,21 @@ export function createRenderer(canvas) {
       text('RAPID', 24, y, 15, PALETTE.rapid, 'left', '700');
       context.fillStyle = PALETTE.rapid;
       context.fillRect(96, y + 2, 110 * (player.rapid / PLAYER.rapidSeconds), 8);
+      y += 24;
+    }
+    if (player.spread > 0) {
+      text('SPREAD', 24, y, 15, PALETTE.spread, 'left', '700');
+      context.fillStyle = PALETTE.spread;
+      context.fillRect(96, y + 2, 110 * (player.spread / PLAYER.spreadSeconds), 8);
+      y += 24;
+    }
+    if (state.multiplier > 1) {
+      // The chain readout: multiplier, kills banked in the chain, and the time left to extend it.
+      text(`COMBO x${state.multiplier}`, 24, y, 17, PALETTE.accent, 'left', '800');
+      context.fillStyle = 'rgba(255,255,255,0.18)';
+      context.fillRect(24, y + 22, 110, 6);
+      context.fillStyle = PALETTE.accent;
+      context.fillRect(24, y + 22, 110 * Math.max(0, state.comboTimer / COMBO.window), 6);
     }
   }
 
@@ -384,7 +444,8 @@ export function createRenderer(canvas) {
   const TITLE_LINES = [
     'Blast the swarm. Dodge the rocks. Survive the carrier.',
     'Move: ← ↑ ↓ → or WASD · Fire: hold Space · Pause: P · Sound: M',
-    'Catch shield, rapid-fire and spare hulls as they fall.',
+    'Catch shield, rapid-fire, spread-shot and spare hulls as they fall.',
+    'Chain kills to raise your multiplier. A hit resets it.',
     '',
   ];
   const PAUSED_LINES = ['The swarm will wait for you.'];
@@ -404,7 +465,7 @@ export function createRenderer(canvas) {
     context.setTransform(view.scale, 0, 0, view.scale, view.x + shakeX * view.scale, view.y + shakeY * view.scale);
     drawField(state);
     if (screen === SCREEN_TITLE) {
-      TITLE_LINES[3] = bestLabel(best);
+      TITLE_LINES[4] = bestLabel(best);
       drawPanel('STARFALL DEFENDER', TITLE_LINES, 'Press Space or tap to launch', PALETTE.accent);
       return;
     }

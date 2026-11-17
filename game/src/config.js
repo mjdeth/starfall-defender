@@ -16,8 +16,15 @@ export const PLAYER = {
   rapidInterval: 0.08,
   rapidSeconds: 10,
   shieldSeconds: 9,
+  spreadSeconds: 10,
   bulletSpeed: 760,
+  spreadSideVx: 175,
+  spreadVy: 735,
 };
+
+/** Kill chains: kills landed within the window keep the chain alive; every step kills in the
+ * chain raise the score multiplier by one, to the cap. Taking a hit resets the chain. */
+export const COMBO = { window: 2.5, step: 5, max: 5 };
 
 export const LIVES = 3;
 
@@ -32,8 +39,11 @@ export const ENEMY = {
   drone: { size: 40, hp: 1, speed: 138, score: 50, fireInterval: 2.6 },
   // Weaver: fast zigzag, 2 hits, from wave 3 on.
   weaver: { size: 44, hp: 2, speed: 196, score: 80 },
+  // Stinger: drifts in, locks on, then dives at the player's position, 2 hits, from wave 4 on.
+  stinger: { size: 36, hp: 2, speed: 150, diveSpeed: 430, lockSeconds: 1.05, score: 120 },
   // Carrier: the wave-5 boss. Parks near the top, strafes, bursts and sheds drones.
-  carrier: { width: 220, height: 84, hp: 42, score: 500, burstInterval: 2.3, droneInterval: 3.6 },
+  // Every later boss wave adds hull and tightens the burst timer (see world.js).
+  carrier: { width: 220, height: 84, hp: 42, hpPerTier: 18, score: 500, burstInterval: 2.3, burstPerTier: 0.25, burstMin: 1.35, droneInterval: 3.6 },
 };
 
 export const POWER = {
@@ -78,8 +88,10 @@ export const PALETTE = {
   weaver: '#c77dff',
   carrier: '#ff4d6d',
   carrierCore: '#ffe66d',
+  stinger: '#ff9100',
   shield: '#6ef2c1',
   rapid: '#ffd166',
+  spread: '#40c4ff',
   life: '#ff8fab',
   particle: '#ffd9a0',
   panel: 'rgba(10, 16, 34, 0.88)',

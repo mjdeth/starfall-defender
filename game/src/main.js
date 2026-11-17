@@ -3,11 +3,11 @@
 // is there. The game moves between four screens: title, play, paused and game over. Sound is a
 // tiny WebAudio synth (no audio files): shots, explosions, power-ups and UI cues, mutable with M.
 //
-// ?seed=N fixes the spawn pattern. ?shot=start|play|end (with &seed=N) stages that scene
+// ?seed=N fixes the spawn pattern. ?shot=start|play|boss|end (with &seed=N) stages that scene
 // instead of running the loop, paints it twice and sets window.__shotReady for a screenshot.
 import { BEST_KEY, LIVES, STEP } from './config.js';
 import { createRandom } from './random.js';
-import { createWorld, EVENT_BOSS, EVENT_HIT, EVENT_KILL, EVENT_OVER, EVENT_POWER, EVENT_SHOOT, EVENT_WAVE } from './world.js';
+import { createWorld, EVENT_BOSS, EVENT_HIT, EVENT_KILL, EVENT_MULT, EVENT_OVER, EVENT_POWER, EVENT_SHOOT, EVENT_WAVE } from './world.js';
 import { ACTION_CONFIRM, ACTION_MUTE, ACTION_PAUSE, createInput } from './input.js';
 import { createRenderer, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
 import { stageShot } from './shots.js';
@@ -106,6 +106,9 @@ const sound = {
     this.tone(392, 392, 0.09, 'triangle', 0.14);
     setTimeout(() => this.tone(587, 587, 0.12, 'triangle', 0.14), 90);
   },
+  mult() {
+    this.tone(660, 990, 0.1, 'sine', 0.13);
+  },
 };
 
 function runShot(name) {
@@ -125,6 +128,7 @@ function runGame() {
   let screen = SCREEN_TITLE;
   let best = readBest();
   let accumulator = 0;
+  let hitStop = 0;
   let last = performance.now();
 
   // Screen readers (and anyone watching the page's text) hear the screen changes and each hit.
@@ -173,7 +177,12 @@ function runGame() {
     }
     const events = world.step(STEP, input.controls(), false);
     if (events & EVENT_SHOOT) sound.shoot(performance.now());
-    if (events & EVENT_KILL) sound.kill(events & EVENT_BOSS ? true : false);
+    if (events & EVENT_KILL) {
+      sound.kill(events & EVENT_BOSS ? true : false);
+      // Hit-stop: a breath of frozen time on a kill, longer on the carrier, sells the impact.
+      hitStop = events & EVENT_BOSS ? 0.09 : 0.022;
+    }
+    if (events & EVENT_MULT) sound.mult();
     if (events & EVENT_POWER) sound.power();
     if (events & EVENT_WAVE) sound.wave();
     if (events & EVENT_OVER) {
@@ -187,13 +196,21 @@ function runGame() {
 
   function frame(now) {
     requestAnimationFrame(frame);
-    accumulator += Math.min((now - last) / 1000, MAX_FRAME);
+    const frameSeconds = Math.min((now - last) / 1000, MAX_FRAME);
+    accumulator += frameSeconds;
     last = now;
     handleActions();
-    if (screen === SCREEN_TITLE || screen === SCREEN_PLAY) {
+    if (hitStop > 0) {
+      hitStop = Math.max(0, hitStop - frameSeconds);
+      accumulator = 0;
+    } else if (screen === SCREEN_TITLE || screen === SCREEN_PLAY) {
       while (accumulator >= STEP && (screen === SCREEN_TITLE || screen === SCREEN_PLAY)) {
         step();
         accumulator -= STEP;
+        if (hitStop > 0) {
+          accumulator = 0;
+          break;
+        }
       }
     } else {
       accumulator = 0;

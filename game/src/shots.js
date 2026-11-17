@@ -1,8 +1,9 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from
+// The screenshot scenes behind ?shot=start|play|boss|end. Each one plays the real rules forward from
 // a fresh world for a fixed number of steps, steered by an autopilot, so the frame is what a
 // short game really looks like and the same seed always gives the same frame. The play pilot
 // aims at the lowest enemy and sidesteps whatever is about to hit it; the end pilot aims badly
-// and never dodges, so the swarm eventually takes it, as happens to a careless player.
+// and never dodges, so the swarm eventually takes it, as happens to a careless player. The boss
+// scene flies the careful pilot through the early waves and stops inside the carrier fight.
 import { FIELD, STEP } from './config.js';
 import { EVENT_OVER, KIND_CARRIER } from './world.js';
 import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
@@ -10,6 +11,7 @@ import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
 const START_SECONDS = 5;
 const PLAY_SECONDS = 26;
 const END_LIMIT_SECONDS = 900;
+const BOSS_LIMIT_SECONDS = 360;
 const HORIZON = 0.4;
 const SAMPLE = 1 / 30;
 
@@ -67,6 +69,23 @@ function pilot(state, careless) {
  */
 export function stageShot(name, world) {
   world.reset();
+  if (name === 'boss') {
+    let bossSteps = 0;
+    for (let index = 0; index < BOSS_LIMIT_SECONDS / STEP; index += 1) {
+      if (world.step(STEP, pilot(world.state, false), false) & EVENT_OVER) break;
+      if (world.state.bossAlive) {
+        bossSteps += 1;
+        // Settle into the fight: stop once the carrier's fan is in the air and the pilot
+        // is answering it, or after ten seconds of boss time either way.
+        let airborne = 0;
+        for (const b of world.state.ebullets) if (b.active) airborne += 1;
+        if (bossSteps > 5 / STEP && airborne >= 4) break;
+        if (bossSteps > 10 / STEP) break;
+      }
+    }
+    const over = world.state.lives <= 0;
+    return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+  }
   if (name !== 'play' && name !== 'end') {
     for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, { x: 0, y: 0, fire: false }, true);
     return { screen: SCREEN_TITLE, best: 0 };

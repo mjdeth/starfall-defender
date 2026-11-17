@@ -4,16 +4,18 @@
 // flags, so the caller can react (sound, announcements) without the world knowing about either.
 // All randomness comes from the seeded generator handed in, so a seed always replays the same
 // game. Pools are allocated once at createWorld; nothing allocates per frame after that.
-import { BULLET, EBULLET, ENEMY, FIELD, LIVES, PARTICLE, PLAYER, POWER, STAR, WAVE } from './config.js';
+import { BULLET, COMBO, EBULLET, ENEMY, FIELD, LIVES, PARTICLE, PLAYER, POWER, STAR, WAVE } from './config.js';
 
 export const KIND_ASTEROID = 0;
 export const KIND_DRONE = 1;
 export const KIND_WEAVER = 2;
 export const KIND_CARRIER = 3;
+export const KIND_STINGER = 4;
 
 export const POW_SHIELD = 0;
 export const POW_RAPID = 1;
 export const POW_LIFE = 2;
+export const POW_SPREAD = 3;
 
 export const EVENT_HIT = 1;
 export const EVENT_KILL = 2;
@@ -22,6 +24,7 @@ export const EVENT_POWER = 8;
 export const EVENT_WAVE = 16;
 export const EVENT_SHOOT = 32;
 export const EVENT_BOSS = 64;
+export const EVENT_MULT = 128;
 
 function overlaps(a, b, shrink) {
   return a.x + shrink < b.x + b.width - shrink && a.x + a.width - shrink > b.x + shrink &&
@@ -31,10 +34,10 @@ function overlaps(a, b, shrink) {
 export function createWorld(random) {
   const player = {
     x: 0, y: 0, width: PLAYER.width, height: PLAYER.height,
-    invulnerable: 0, shield: 0, rapid: 0, fireTimer: 0, alive: true,
+    invulnerable: 0, shield: 0, rapid: 0, spread: 0, fireTimer: 0, alive: true,
   };
   const bullets = [];
-  for (let i = 0; i < BULLET.pool; i += 1) bullets.push({ active: false, x: 0, y: 0, width: BULLET.width, height: BULLET.height });
+  for (let i = 0; i < BULLET.pool; i += 1) bullets.push({ active: false, x: 0, y: 0, vx: 0, vy: 0, width: BULLET.width, height: BULLET.height });
   const ebullets = [];
   for (let i = 0; i < EBULLET.pool; i += 1) ebullets.push({ active: false, x: 0, y: 0, vx: 0, vy: 0, width: EBULLET.radius * 2, height: EBULLET.radius * 2 });
   const enemies = [];
@@ -43,6 +46,7 @@ export function createWorld(random) {
       active: false, kind: KIND_ASTEROID, x: 0, y: 0, width: 0, height: 0, hp: 1, maxHp: 1,
       vx: 0, vy: 0, t: 0, phase: 0, fireTimer: 0, burstTimer: 0, droneTimer: 0, dir: 1,
       shape: [1, 1, 1, 1, 1, 1, 1, 1], spin: 0, rot: 0,
+      dive: 0, dvx: 0, dvy: 0, tier: 1, burstEvery: 0, strafe: 120,
     });
   }
   const powerups = [];
@@ -58,6 +62,7 @@ export function createWorld(random) {
     player, bullets, ebullets, enemies, powerups, particles, stars,
     score: 0, lives: LIVES, wave: 0, elapsed: 0,
     toSpawn: 0, spawnTimer: 0, waveTimer: WAVE.bannerSeconds, bossAlive: false, shake: 0,
+    combo: 0, comboTimer: 0, multiplier: 1, trailTick: 0,
   };
 
   function reset() {
@@ -66,6 +71,7 @@ export function createWorld(random) {
     player.invulnerable = 0;
     player.shield = 0;
     player.rapid = 0;
+    player.spread = 0;
     player.fireTimer = 0;
     player.alive = true;
     for (const pool of [bullets, ebullets, enemies, powerups, particles]) {
@@ -80,6 +86,10 @@ export function createWorld(random) {
     state.waveTimer = 0.6;
     state.bossAlive = false;
     state.shake = 0;
+    state.combo = 0;
+    state.comboTimer = 0;
+    state.multiplier = 1;
+    state.trailTick = 0;
   }
 
   function freeOf(pool) {
@@ -119,6 +129,7 @@ export function createWorld(random) {
     e.active = true;
     e.kind = kind;
     e.t = 0;
+    e.dive = 0;
     e.phase = random() * Math.PI * 2;
     e.fireTimer = ENEMY.drone.fireInterval * (0.6 + random() * 0.8);
     if (kind === KIND_ASTEROID) {
@@ -149,15 +160,28 @@ export function createWorld(random) {
       e.y = -e.height;
       e.vx = 0;
       e.vy = s.speed * scale;
+    } else if (kind === KIND_STINGER) {
+      const s = ENEMY.stinger;
+      e.width = s.size; e.height = s.size;
+      e.hp = e.maxHp = s.hp;
+      e.x = random() * (FIELD.width - e.width);
+      e.y = -e.height;
+      e.vx = 0;
+      e.vy = s.speed * scale;
     } else {
       const s = ENEMY.carrier;
+      // Boss tier: wave 5 is tier 1, wave 10 tier 2, and so on. Each tier adds hull,
+      // a faster strafe and a tighter burst timer; tier 2 up also aims a spread at the player.
+      e.tier = Math.max(1, Math.round(state.wave / 5));
       e.width = s.width; e.height = s.height;
-      e.hp = e.maxHp = s.hp;
+      e.hp = e.maxHp = s.hp + (e.tier - 1) * s.hpPerTier;
       e.x = (FIELD.width - e.width) / 2;
       e.y = -e.height - 10;
       e.vx = 0; e.vy = 62;
       e.dir = random() < 0.5 ? -1 : 1;
-      e.burstTimer = s.burstInterval;
+      e.burstEvery = Math.max(s.burstMin, s.burstInterval - (e.tier - 1) * s.burstPerTier);
+      e.burstTimer = e.burstEvery;
+      e.strafe = 120 + (e.tier - 1) * 22;
       e.droneTimer = s.droneInterval;
       state.bossAlive = true;
     }
@@ -177,9 +201,21 @@ export function createWorld(random) {
 
   function pickKind() {
     const roll = random();
-    if (state.wave >= 3 && roll < 0.22) return KIND_WEAVER;
-    if (roll < 0.55) return KIND_DRONE;
+    if (state.wave >= 4 && roll < 0.13) return KIND_STINGER;
+    if (state.wave >= 3 && roll < 0.32) return KIND_WEAVER;
+    if (roll < 0.58) return KIND_DRONE;
     return KIND_ASTEROID;
+  }
+
+  function fireBullet(vx, vy) {
+    const b = freeOf(bullets);
+    if (b === null) return false;
+    b.active = true;
+    b.x = player.x + player.width / 2 - BULLET.width / 2;
+    b.y = player.y - BULLET.height;
+    b.vx = vx;
+    b.vy = vy;
+    return true;
   }
 
   function fireEbullet(x, y, angle, speed) {
@@ -196,7 +232,11 @@ export function createWorld(random) {
     const p = freeOf(powerups);
     if (p === null) return;
     p.active = true;
-    p.kind = forceKind !== undefined ? forceKind : (random() < 0.55 ? POW_SHIELD : POW_RAPID);
+    if (forceKind !== undefined) p.kind = forceKind;
+    else {
+      const roll = random();
+      p.kind = roll < 0.36 ? POW_SHIELD : roll < 0.66 ? POW_RAPID : POW_SPREAD;
+    }
     p.x = x - POWER.size / 2;
     p.y = y - POWER.size / 2;
     p.t = 0;
@@ -206,29 +246,48 @@ export function createWorld(random) {
     e.active = false;
     const cx = e.x + e.width / 2;
     const cy = e.y + e.height / 2;
+    let base = 0;
     if (e.kind === KIND_ASTEROID) {
-      state.score += ENEMY.asteroid.score;
+      base = ENEMY.asteroid.score;
       explode(cx, cy, 12, 30);
     } else if (e.kind === KIND_DRONE) {
-      state.score += ENEMY.drone.score;
+      base = ENEMY.drone.score;
       explode(cx, cy, 14, 18);
       if (random() < POWER.droneDropChance) dropPower(cx, cy);
     } else if (e.kind === KIND_WEAVER) {
-      state.score += ENEMY.weaver.score;
+      base = ENEMY.weaver.score;
       explode(cx, cy, 16, 275);
       if (random() < POWER.weaverDropChance) dropPower(cx, cy);
+    } else if (e.kind === KIND_STINGER) {
+      base = ENEMY.stinger.score;
+      explode(cx, cy, 16, 36);
+      if (random() < POWER.weaverDropChance) dropPower(cx, cy);
     } else {
-      state.score += ENEMY.carrier.score;
+      base = ENEMY.carrier.score;
       explode(cx, cy, 46, 350);
       state.bossAlive = false;
       state.shake = 0.45;
       dropPower(cx, cy, POW_LIFE);
       events |= EVENT_BOSS;
     }
+    // Chain scoring: the kill extends the chain, and every COMBO.step kills in it
+    // raise the multiplier applied to this and later kills until the chain lapses.
+    state.combo += 1;
+    state.comboTimer = COMBO.window;
+    const raised = Math.min(COMBO.max, 1 + Math.floor(state.combo / COMBO.step));
+    if (raised > state.multiplier) {
+      state.multiplier = raised;
+      events |= EVENT_MULT;
+    }
+    state.score += base * state.multiplier;
     return events | EVENT_KILL;
   }
 
   function hitPlayer(events) {
+    // Any hit breaks the kill chain, shield or not.
+    state.combo = 0;
+    state.comboTimer = 0;
+    state.multiplier = 1;
     if (player.shield > 0) {
       player.shield = 0;
       player.invulnerable = 1.0;
@@ -328,23 +387,50 @@ export function createWorld(random) {
     if (player.invulnerable > 0) player.invulnerable = Math.max(0, player.invulnerable - dt);
     if (player.shield > 0) player.shield = Math.max(0, player.shield - dt);
     if (player.rapid > 0) player.rapid = Math.max(0, player.rapid - dt);
+    if (player.spread > 0) player.spread = Math.max(0, player.spread - dt);
+    if (state.comboTimer > 0) {
+      state.comboTimer = Math.max(0, state.comboTimer - dt);
+      if (state.comboTimer === 0) {
+        state.combo = 0;
+        state.multiplier = 1;
+      }
+    }
+    // Engine trail: one exhaust mote every few steps, placed from the run's clock rather
+    // than the seeded generator, so replays keep the same spawn pattern.
+    state.trailTick += 1;
+    if (player.alive && state.trailTick % 3 === 0) {
+      const p = freeOf(particles);
+      if (p !== null) {
+        p.active = true;
+        p.x = player.x + player.width / 2 + Math.sin(state.elapsed * 23) * 4;
+        p.y = player.y + player.height + 4;
+        p.vx = 0;
+        p.vy = 130;
+        p.maxLife = 0.3;
+        p.life = 0.3;
+        p.size = 3;
+        p.hue = 32;
+      }
+    }
 
-    // Player fire.
+    // Player fire: one bolt, or three in a fan while the spread-shot lasts.
     player.fireTimer -= dt;
     if (controls.fire && player.fireTimer <= 0) {
-      const b = freeOf(bullets);
-      if (b !== null) {
-        b.active = true;
-        b.x = player.x + player.width / 2 - BULLET.width / 2;
-        b.y = player.y - BULLET.height;
+      let fired = fireBullet(0, -PLAYER.bulletSpeed);
+      if (player.spread > 0) {
+        fired = fireBullet(-PLAYER.spreadSideVx, -PLAYER.spreadVy) || fired;
+        fired = fireBullet(PLAYER.spreadSideVx, -PLAYER.spreadVy) || fired;
+      }
+      if (fired) {
         player.fireTimer = player.rapid > 0 ? PLAYER.rapidInterval : PLAYER.fireInterval;
         events |= EVENT_SHOOT;
       }
     }
     for (const b of bullets) {
       if (!b.active) continue;
-      b.y -= PLAYER.bulletSpeed * dt;
-      if (b.y + b.height < 0) b.active = false;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      if (b.y + b.height < 0 || b.x + b.width < 0 || b.x > FIELD.width) b.active = false;
     }
 
     // Enemies.
@@ -373,11 +459,30 @@ export function createWorld(random) {
       } else if (e.kind === KIND_WEAVER) {
         e.y += e.vy * dt;
         e.x += Math.sin(e.t * 5.2 + e.phase) * 330 * dt;
+      } else if (e.kind === KIND_STINGER) {
+        if (e.dive === 0) {
+          e.y += e.vy * dt;
+          e.x += Math.sin(e.t * 3.1 + e.phase) * 90 * dt;
+          if (e.t >= ENEMY.stinger.lockSeconds && player.alive) {
+            // Lock-on: the dive aims at where the player is right now and never tracks again,
+            // so a quick sidestep beats it.
+            const cx = e.x + e.width / 2;
+            const cy = e.y + e.height / 2;
+            const angle = Math.atan2(player.y + player.height / 2 - cy, player.x + player.width / 2 - cx);
+            e.dvx = Math.cos(angle) * ENEMY.stinger.diveSpeed;
+            e.dvy = Math.sin(angle) * ENEMY.stinger.diveSpeed;
+            e.dive = 1;
+          }
+        } else {
+          e.x += e.dvx * dt;
+          e.y += e.dvy * dt;
+          if (e.x < -90 || e.x > FIELD.width + 90) { e.active = false; continue; }
+        }
       } else {
         // Carrier: descends to its park line, then strafes; bursts and sheds drones on timers.
         if (e.y < 64) e.y += e.vy * dt;
         else {
-          e.x += e.dir * 120 * dt;
+          e.x += e.dir * e.strafe * dt;
           if (e.x < 30) { e.x = 30; e.dir = 1; }
           if (e.x > FIELD.width - e.width - 30) { e.x = FIELD.width - e.width - 30; e.dir = -1; }
           e.burstTimer -= dt;
@@ -387,7 +492,13 @@ export function createWorld(random) {
             for (let k = 0; k < 10; k += 1) {
               fireEbullet(cx, cy, Math.PI / 2 + (k - 4.5) * 0.22, EBULLET.speed * 0.92);
             }
-            e.burstTimer = ENEMY.carrier.burstInterval;
+            if (e.tier >= 2) {
+              const angle = Math.atan2(player.y - cy, player.x + player.width / 2 - cx);
+              for (let k = -1; k <= 1; k += 1) {
+                fireEbullet(cx, cy, angle + k * 0.18, EBULLET.speed * 1.05);
+              }
+            }
+            e.burstTimer = e.burstEvery;
           }
           e.droneTimer -= dt;
           if (e.droneTimer <= 0) {
@@ -451,6 +562,7 @@ export function createWorld(random) {
         p.active = false;
         if (p.kind === POW_SHIELD) player.shield = PLAYER.shieldSeconds;
         else if (p.kind === POW_RAPID) player.rapid = PLAYER.rapidSeconds;
+        else if (p.kind === POW_SPREAD) player.spread = PLAYER.spreadSeconds;
         else state.lives = Math.min(6, state.lives + 1);
         events |= EVENT_POWER;
       }
