@@ -41,6 +41,11 @@ export const ENEMY = {
   weaver: { size: 44, hp: 2, speed: 196, score: 80 },
   // Stinger: drifts in, locks on, then dives at the player's position, 2 hits, from wave 4 on.
   stinger: { size: 36, hp: 2, speed: 150, diveSpeed: 430, lockSeconds: 1.05, score: 120 },
+  // Kamikaze: steers after the player with a limited turn rate, speeding up as it hunts, and
+  // blows up when its fuse runs out or it gets close: the blast hurts anything of the player's
+  // inside blastRadius and clears enemy bullets there. Shot down first (1 hit) it is disarmed:
+  // no blast, just the score. From wave 5 on.
+  kamikaze: { size: 34, hp: 1, speed: 128, turn: 3.1, thrust: 520, maxSpeed: 430, fuse: 3.6, blastRadius: 100, blastTrigger: 52, score: 150 },
   // Carrier: the wave-5 boss. Parks near the top, strafes, bursts and sheds drones.
   // Every later boss wave adds hull and tightens the burst timer (see world.js).
   carrier: { width: 220, height: 84, hp: 42, hpPerTier: 18, score: 500, burstInterval: 2.3, burstPerTier: 0.25, burstMin: 1.35, droneInterval: 3.6 },
@@ -59,7 +64,7 @@ export const POWER = {
 /** Carrier-kill upgrades: each one the player takes moves its dial by one step. */
 export const UPGRADE = { fireStep: 0.12, fireMax: 1.6, scoreBonus: 500 };
 
-export const PARTICLE = { pool: 320 };
+export const PARTICLE = { pool: 400 };
 
 export const STAR = { count: 110 };
 
@@ -94,6 +99,8 @@ export const PALETTE = {
   carrier: '#ff4d6d',
   carrierCore: '#ffe66d',
   stinger: '#ff9100',
+  kamikaze: '#ff3355',
+  kamikazeCore: '#fff3b0',
   shield: '#6ef2c1',
   rapid: '#ffd166',
   spread: '#40c4ff',

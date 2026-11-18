@@ -4,8 +4,8 @@
 // a sleek fighter with a flickering engine flame, tumbling asteroids, drones, weavers and the
 // carrier, glowing bullets and explosion particles. Text that holds a number is rebuilt only
 // when the number changes, so a frame allocates nothing.
-import { COMBO, FIELD, FONT, PALETTE, PLAYER } from './config.js';
-import { KIND_ASTEROID, KIND_CARRIER, KIND_DRONE, KIND_STINGER, KIND_WEAVER, POW_LIFE, POW_RAPID, POW_SHIELD, POW_SPREAD } from './world.js';
+import { COMBO, ENEMY, FIELD, FONT, PALETTE, PLAYER } from './config.js';
+import { KIND_ASTEROID, KIND_CARRIER, KIND_DRONE, KIND_KAMIKAZE, KIND_STINGER, KIND_WEAVER, POW_LIFE, POW_RAPID, POW_SHIELD, POW_SPREAD } from './world.js';
 
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
@@ -183,6 +183,45 @@ export function createRenderer(canvas) {
     if (e.hp < e.maxHp) drawMiniBar(cx, e.y - 12, e.width, e.hp / e.maxHp);
   }
 
+  function drawKamikaze(e, elapsed) {
+    const cx = e.x + e.width / 2;
+    const cy = e.y + e.height / 2;
+    const fuseLeft = ENEMY.kamikaze.fuse - e.t;
+    // In its last second it shows its hand: a thin red ring at exactly blast radius,
+    // so a player just outside it can watch it blow in safety.
+    if (fuseLeft < 1.0) {
+      context.save();
+      context.globalAlpha = 0.25 + 0.2 * Math.sin(elapsed * 18);
+      context.strokeStyle = PALETTE.kamikaze;
+      context.lineWidth = 2;
+      context.beginPath();
+      context.arc(cx, cy, ENEMY.kamikaze.blastRadius, 0, Math.PI * 2);
+      context.stroke();
+      context.restore();
+    }
+    context.save();
+    context.translate(cx, cy);
+    context.rotate(Math.atan2(e.dvy, e.dvx) - Math.PI / 2);
+    // A slim dart, nose down its own heading.
+    context.beginPath();
+    context.moveTo(0, e.height / 2);
+    context.lineTo(e.width / 2, -e.height / 4);
+    context.lineTo(e.width / 4, -e.height / 2);
+    context.lineTo(-e.width / 4, -e.height / 2);
+    context.lineTo(-e.width / 2, -e.height / 4);
+    context.closePath();
+    context.fillStyle = PALETTE.kamikaze;
+    context.fill();
+    // The warhead strobes faster the closer the fuse gets to burning out.
+    const rate = 4 + Math.max(0, (ENEMY.kamikaze.fuse - fuseLeft) * 5);
+    const lit = Math.floor(elapsed * rate) % 2 === 0;
+    context.fillStyle = lit ? '#ffffff' : PALETTE.kamikazeCore;
+    context.beginPath();
+    context.arc(0, 0, 5.5, 0, Math.PI * 2);
+    context.fill();
+    context.restore();
+  }
+
   function drawCarrier(e, elapsed) {
     context.save();
     context.translate(e.x, e.y);
@@ -342,6 +381,7 @@ export function createRenderer(canvas) {
       else if (e.kind === KIND_DRONE) drawDrone(e, state.elapsed);
       else if (e.kind === KIND_WEAVER) drawWeaver(e);
       else if (e.kind === KIND_STINGER) drawStinger(e, state.elapsed);
+      else if (e.kind === KIND_KAMIKAZE) drawKamikaze(e, state.elapsed);
       else drawCarrier(e, state.elapsed);
     }
     // Bullets and particles glow: draw them additively.
@@ -367,6 +407,16 @@ export function createRenderer(canvas) {
     for (const p of state.particles) {
       if (!p.active) continue;
       const frac = p.life / p.maxLife;
+      if (p.ring > 0) {
+        // Shockwave: a stroked circle that swells to its full radius as it fades.
+        context.globalAlpha = frac * 0.75;
+        context.strokeStyle = `hsl(${p.hue}, 95%, 68%)`;
+        context.lineWidth = 3;
+        context.beginPath();
+        context.arc(p.x, p.y, (1 - frac) * p.ring, 0, Math.PI * 2);
+        context.stroke();
+        continue;
+      }
       context.globalAlpha = frac;
       context.fillStyle = `hsl(${p.hue}, 95%, ${55 + frac * 25}%)`;
       context.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
@@ -454,6 +504,7 @@ export function createRenderer(canvas) {
     'Move: ← ↑ ↓ → or WASD · Fire: hold Space · Pause: P · Sound: M',
     'Catch shield, rapid-fire, spread-shot and spare hulls as they fall.',
     'Chain kills to raise your multiplier. A hit resets it.',
+    'Kamikazes hunt you: pop them early or dodge the blast.',
     'Fell the carrier and choose an upgrade for the run.',
     '',
   ];
@@ -506,7 +557,7 @@ export function createRenderer(canvas) {
     context.setTransform(view.scale, 0, 0, view.scale, view.x + shakeX * view.scale, view.y + shakeY * view.scale);
     drawField(state);
     if (screen === SCREEN_TITLE) {
-      TITLE_LINES[5] = bestLabel(best);
+      TITLE_LINES[6] = bestLabel(best);
       drawPanel('STARFALL DEFENDER', TITLE_LINES, 'Press Space or tap to launch', PALETTE.accent);
       return;
     }

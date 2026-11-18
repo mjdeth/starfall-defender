@@ -5,7 +5,7 @@
 // and never dodges, so the swarm eventually takes it, as happens to a careless player. The boss
 // scene flies the careful pilot through the early waves and stops inside the carrier fight.
 import { FIELD, STEP } from './config.js';
-import { EVENT_OVER, KIND_CARRIER } from './world.js';
+import { EVENT_OVER, KIND_CARRIER, KIND_KAMIKAZE } from './world.js';
 import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
 
 const START_SECONDS = 5;
@@ -82,6 +82,24 @@ export function stageShot(name, world) {
         if (bossSteps > 5 / STEP && airborne >= 4) break;
         if (bossSteps > 10 / STEP) break;
       }
+    }
+    const over = world.state.lives <= 0;
+    return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+  }
+  if (name === 'kami') {
+    // Jump straight to a wave-6 field and fly a pilot that dodges but never fires, so the
+    // kamikaze lives out its fuse: stop in its last second, blast ring on show.
+    world.state.wave = 5;
+    world.state.waveTimer = 0.01;
+    for (let index = 0; index < BOSS_LIMIT_SECONDS / STEP; index += 1) {
+      const controls = pilot(world.state, false);
+      controls.fire = false;
+      if (world.step(STEP, controls, false) & EVENT_OVER) break;
+      let hunter = null;
+      for (const e of world.state.enemies) {
+        if (e.active && e.kind === KIND_KAMIKAZE) { hunter = e; break; }
+      }
+      if (hunter !== null && hunter.t > 2.7) break;
     }
     const over = world.state.lives <= 0;
     return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };

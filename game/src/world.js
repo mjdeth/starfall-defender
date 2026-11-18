@@ -11,6 +11,7 @@ export const KIND_DRONE = 1;
 export const KIND_WEAVER = 2;
 export const KIND_CARRIER = 3;
 export const KIND_STINGER = 4;
+export const KIND_KAMIKAZE = 5;
 
 export const POW_SHIELD = 0;
 export const POW_RAPID = 1;
@@ -25,6 +26,7 @@ export const EVENT_WAVE = 16;
 export const EVENT_SHOOT = 32;
 export const EVENT_BOSS = 64;
 export const EVENT_MULT = 128;
+export const EVENT_BOOM = 256;
 
 /** The upgrades offered after a carrier kill; applyUpgrade below gives them effect. */
 export const UP_FIRE = 0;
@@ -52,13 +54,13 @@ export function createWorld(random) {
       active: false, kind: KIND_ASTEROID, x: 0, y: 0, width: 0, height: 0, hp: 1, maxHp: 1,
       vx: 0, vy: 0, t: 0, phase: 0, fireTimer: 0, burstTimer: 0, droneTimer: 0, dir: 1,
       shape: [1, 1, 1, 1, 1, 1, 1, 1], spin: 0, rot: 0,
-      dive: 0, dvx: 0, dvy: 0, tier: 1, burstEvery: 0, strafe: 120, mini: false,
+      dive: 0, dvx: 0, dvy: 0, tier: 1, burstEvery: 0, strafe: 120, mini: false, bursts: 0,
     });
   }
   const powerups = [];
   for (let i = 0; i < POWER.pool; i += 1) powerups.push({ active: false, kind: POW_SHIELD, x: 0, y: 0, width: POWER.size, height: POWER.size, t: 0 });
   const particles = [];
-  for (let i = 0; i < PARTICLE.pool; i += 1) particles.push({ active: false, x: 0, y: 0, vx: 0, vy: 0, life: 0, maxLife: 1, size: 2, hue: 0 });
+  for (let i = 0; i < PARTICLE.pool; i += 1) particles.push({ active: false, x: 0, y: 0, vx: 0, vy: 0, life: 0, maxLife: 1, size: 2, hue: 0, ring: 0 });
   const stars = [];
   for (let i = 0; i < STAR.count; i += 1) {
     stars.push({ x: random() * FIELD.width, y: random() * FIELD.height, layer: i % 3, size: 1 + (i % 3) });
@@ -110,19 +112,53 @@ export function createWorld(random) {
   }
 
   function explode(x, y, count, hue) {
+    // Sparks in two tempers: a fast bright third that streaks out, the rest drifting slower,
+    // every hue jittered a little so no two bursts share exactly one colour.
     for (let n = 0; n < count; n += 1) {
       const p = freeOf(particles);
       if (p === null) return;
       const angle = random() * Math.PI * 2;
-      const speed = 60 + random() * 320;
+      const speed = n % 3 === 0 ? 240 + random() * 240 : 50 + random() * 220;
       p.active = true;
+      p.ring = 0;
       p.x = x; p.y = y;
       p.vx = Math.cos(angle) * speed;
       p.vy = Math.sin(angle) * speed;
       p.maxLife = 0.35 + random() * 0.55;
       p.life = p.maxLife;
-      p.size = 2 + random() * 4;
-      p.hue = hue;
+      p.size = 1.5 + random() * 4.5;
+      p.hue = hue + (random() * 28 - 14);
+    }
+    // Embers: a slower third as many again, hanging in the air after the flash is gone.
+    const embers = Math.round(count / 3);
+    for (let n = 0; n < embers; n += 1) {
+      const p = freeOf(particles);
+      if (p === null) return;
+      const angle = random() * Math.PI * 2;
+      const speed = 20 + random() * 70;
+      p.active = true;
+      p.ring = 0;
+      p.x = x; p.y = y;
+      p.vx = Math.cos(angle) * speed;
+      p.vy = Math.sin(angle) * speed;
+      p.maxLife = 0.8 + random() * 0.8;
+      p.life = p.maxLife;
+      p.size = 2 + random() * 1.5;
+      p.hue = hue + (random() * 20 - 10);
+    }
+    // A real bang (a boss, a bomb, the ship) also throws a shockwave ring that expands and fades.
+    if (count >= 14) {
+      const p = freeOf(particles);
+      if (p !== null) {
+        p.active = true;
+        p.ring = Math.min(150, 44 + count * 2.2);
+        p.x = x; p.y = y;
+        p.vx = 0; p.vy = 0;
+        p.maxLife = 0.38;
+        p.life = p.maxLife;
+        p.size = 3;
+        p.hue = hue;
+      }
     }
   }
 
@@ -142,6 +178,7 @@ export function createWorld(random) {
     e.kind = kind;
     e.t = 0;
     e.dive = 0;
+    e.bursts = 0;
     e.mini = false;
     e.phase = random() * Math.PI * 2;
     e.fireTimer = ENEMY.drone.fireInterval * (0.6 + random() * 0.8);
@@ -181,6 +218,17 @@ export function createWorld(random) {
       e.y = -e.height;
       e.vx = 0;
       e.vy = s.speed * scale;
+    } else if (kind === KIND_KAMIKAZE) {
+      const s = ENEMY.kamikaze;
+      e.width = s.size; e.height = s.size;
+      e.hp = e.maxHp = s.hp;
+      e.x = random() * (FIELD.width - e.width);
+      e.y = -e.height;
+      e.vx = 0;
+      e.vy = s.speed * scale;
+      // Its real velocity lives in dvx/dvy: it starts as the fall above and steers from there.
+      e.dvx = 0;
+      e.dvy = e.vy;
     } else {
       const s = ENEMY.carrier;
       // Boss tier: wave 5 is tier 1, wave 10 tier 2, and so on. Each tier adds hull,
@@ -245,6 +293,8 @@ export function createWorld(random) {
     if (state.wave >= 4 && roll < 0.13) return KIND_STINGER;
     if (state.wave >= 3 && roll < 0.32) return KIND_WEAVER;
     if (roll < 0.58) return KIND_DRONE;
+    // Kamikazes take their share out of the asteroids', so the early mix is unchanged.
+    if (state.wave >= 5 && roll < 0.67) return KIND_KAMIKAZE;
     return KIND_ASTEROID;
   }
 
@@ -307,6 +357,11 @@ export function createWorld(random) {
       base = ENEMY.stinger.score;
       explode(cx, cy, 16, 36);
       if (random() < POWER.weaverDropChance) dropPower(cx, cy);
+    } else if (e.kind === KIND_KAMIKAZE) {
+      // Shot down, it never goes off: the reward for popping it early is the score and safety.
+      base = ENEMY.kamikaze.score;
+      explode(cx, cy, 18, 8);
+      if (random() < POWER.droneDropChance) dropPower(cx, cy);
     } else {
       base = ENEMY.carrier.score;
       explode(cx, cy, 46, 350);
@@ -326,6 +381,33 @@ export function createWorld(random) {
     }
     state.score += base * state.multiplier;
     return events | EVENT_KILL;
+  }
+
+  /**
+   * A kamikaze goes off: a big burst and a shockwave, every enemy bullet inside the blast
+   * radius scattered, and the player hurt if caught inside it (and not already flashing from
+   * an earlier hit). Returns the events with EVENT_BOOM (and any hit) folded in.
+   */
+  function detonate(e, events) {
+    const s = ENEMY.kamikaze;
+    const cx = e.x + e.width / 2;
+    const cy = e.y + e.height / 2;
+    e.active = false;
+    explode(cx, cy, 30, 8);
+    state.shake = Math.max(state.shake, 0.28);
+    for (const b of ebullets) {
+      if (!b.active) continue;
+      const dx = b.x + 6 - cx;
+      const dy = b.y + 6 - cy;
+      if (dx * dx + dy * dy < s.blastRadius * s.blastRadius) b.active = false;
+    }
+    events |= EVENT_BOOM;
+    if (player.alive && player.invulnerable === 0) {
+      const dx = player.x + player.width / 2 - cx;
+      const dy = player.y + player.height / 2 - cy;
+      if (dx * dx + dy * dy < s.blastRadius * s.blastRadius) events = hitPlayer(events);
+    }
+    return events;
   }
 
   function hitPlayer(events) {
@@ -462,6 +544,7 @@ export function createWorld(random) {
       const p = freeOf(particles);
       if (p !== null) {
         p.active = true;
+        p.ring = 0;
         p.x = player.x + player.width / 2 + Math.sin(state.elapsed * 23) * 4;
         p.y = player.y + player.height + 4;
         p.vx = 0;
@@ -539,6 +622,37 @@ export function createWorld(random) {
           e.y += e.dvy * dt;
           if (e.x < -90 || e.x > FIELD.width + 90) { e.active = false; continue; }
         }
+      } else if (e.kind === KIND_KAMIKAZE) {
+        // Homing: bend the velocity toward the player by at most the turn rate, and keep
+        // accelerating. The turn cap is the fairness: a hard sidestep makes it overshoot,
+        // and the fuse caps how long it can hunt at all.
+        const s = ENEMY.kamikaze;
+        const cx = e.x + e.width / 2;
+        const cy = e.y + e.height / 2;
+        const px = player.x + player.width / 2;
+        const py = player.y + player.height / 2;
+        const dx = px - cx;
+        const dy = py - cy;
+        const dist = Math.hypot(dx, dy) || 1;
+        const current = Math.atan2(e.dvy, e.dvx);
+        let diff = Math.atan2(dy, dx) - current;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        const maxTurn = s.turn * dt;
+        const angle = current + Math.max(-maxTurn, Math.min(maxTurn, diff));
+        const speed = Math.min(s.maxSpeed, Math.hypot(e.dvx, e.dvy) + s.thrust * dt);
+        e.dvx = Math.cos(angle) * speed;
+        e.dvy = Math.sin(angle) * speed;
+        e.x += e.dvx * dt;
+        e.y += e.dvy * dt;
+        // Mirrored into vx/vy so the screenshot pilot's danger math sees the real heading.
+        e.vx = e.dvx;
+        e.vy = e.dvy;
+        if (e.t >= s.fuse || (player.alive && dist < s.blastTrigger)) {
+          events = detonate(e, events);
+          if (events & EVENT_OVER) return events;
+          continue;
+        }
       } else {
         // Carrier: descends to its park line, then strafes; bursts and sheds drones on timers.
         if (e.y < 64) e.y += e.vy * dt;
@@ -550,14 +664,42 @@ export function createWorld(random) {
           if (e.burstTimer <= 0) {
             const cx = e.x + e.width / 2;
             const cy = e.y + e.height;
-            for (let k = 0; k < 10; k += 1) {
-              fireEbullet(cx, cy, Math.PI / 2 + (k - 4.5) * 0.22, EBULLET.speed * 0.92);
-            }
-            if (e.tier >= 2) {
-              const angle = Math.atan2(player.y - cy, player.x + player.width / 2 - cx);
-              for (let k = -1; k <= 1; k += 1) {
-                fireEbullet(cx, cy, angle + k * 0.18, EBULLET.speed * 1.05);
+            // The carrier rotates its shot pattern burst by burst, so standing in one
+            // rhythm stops working: a wide radial fan, then a fan aimed at the player,
+            // then a split fan with a safe lane down the middle. Under half hull it is
+            // enraged and every pattern carries extra shot. Tier 2 up adds its aimed
+            // spread on top of the radial fan, as before.
+            const pattern = e.bursts % 3;
+            e.bursts += 1;
+            const enraged = e.hp <= e.maxHp / 2;
+            const toPlayer = Math.atan2(player.y - cy, player.x + player.width / 2 - cx);
+            if (pattern === 0) {
+              for (let k = 0; k < 10; k += 1) {
+                fireEbullet(cx, cy, Math.PI / 2 + (k - 4.5) * 0.22, EBULLET.speed * 0.92);
               }
+              if (e.tier >= 2) {
+                for (let k = -1; k <= 1; k += 1) {
+                  fireEbullet(cx, cy, toPlayer + k * 0.18, EBULLET.speed * 1.05);
+                }
+              }
+              if (enraged) {
+                fireEbullet(cx, cy, toPlayer - 0.42, EBULLET.speed * 1.05);
+                fireEbullet(cx, cy, toPlayer + 0.42, EBULLET.speed * 1.05);
+              }
+            } else if (pattern === 1) {
+              const shots = e.tier >= 2 ? 7 : 5;
+              for (let k = 0; k < shots; k += 1) {
+                fireEbullet(cx, cy, toPlayer + (k - (shots - 1) / 2) * 0.16, EBULLET.speed * 1.03);
+              }
+              if (enraged) {
+                fireEbullet(cx, cy, toPlayer - 0.55, EBULLET.speed);
+                fireEbullet(cx, cy, toPlayer + 0.55, EBULLET.speed);
+              }
+            } else {
+              for (const k of [-3, -2, -1, 1, 2, 3]) {
+                fireEbullet(cx, cy, Math.PI / 2 + k * 0.23, EBULLET.speed * 0.95);
+              }
+              if (enraged) fireEbullet(cx, cy, toPlayer, EBULLET.speed * 1.08);
             }
             e.burstTimer = e.burstEvery;
           }
@@ -579,7 +721,8 @@ export function createWorld(random) {
       if (player.alive && player.invulnerable === 0 && overlaps(e, player, 8)) {
         e.active = false;
         if (e.kind === KIND_CARRIER) state.bossAlive = false;
-        explode(e.x + e.width / 2, e.y + e.height / 2, 14, 30);
+        if (e.kind === KIND_KAMIKAZE) explode(e.x + e.width / 2, e.y + e.height / 2, 26, 8);
+        else explode(e.x + e.width / 2, e.y + e.height / 2, 14, 30);
         events = hitPlayer(events);
         if (events & EVENT_OVER) return events;
       }

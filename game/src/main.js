@@ -8,7 +8,7 @@
 // instead of running the loop, paints it twice and sets window.__shotReady for a screenshot.
 import { BEST_KEY, LIVES, STEP, UPGRADE } from './config.js';
 import { createRandom } from './random.js';
-import { createWorld, EVENT_BOSS, EVENT_HIT, EVENT_KILL, EVENT_MULT, EVENT_OVER, EVENT_POWER, EVENT_SHOOT, EVENT_WAVE, UP_FIRE, UP_LIFE, UP_MAGNET, UP_SCORE } from './world.js';
+import { createWorld, EVENT_BOOM, EVENT_BOSS, EVENT_HIT, EVENT_KILL, EVENT_MULT, EVENT_OVER, EVENT_POWER, EVENT_SHOOT, EVENT_WAVE, UP_FIRE, UP_LIFE, UP_MAGNET, UP_SCORE } from './world.js';
 import { ACTION_CONFIRM, ACTION_MUTE, ACTION_ONE, ACTION_PAUSE, ACTION_TWO, createInput } from './input.js';
 import { createRenderer, SCREEN_CHOICE, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
 import { stageShot } from './shots.js';
@@ -261,6 +261,7 @@ function runGame() {
       // Hit-stop: a breath of frozen time on a kill, longer on the carrier, sells the impact.
       hitStop = events & EVENT_BOSS ? 0.09 : 0.022;
     }
+    if (events & EVENT_BOOM) sound.kill(true);
     if (events & EVENT_MULT) sound.mult();
     if (events & EVENT_POWER) sound.power();
     if (events & EVENT_WAVE) sound.wave();
