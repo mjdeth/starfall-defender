@@ -4,11 +4,12 @@
 // and screenshots/ from beside this file to /output and writes /output/dossier.json, the summary
 // the judge reads, with the vendored make.fun library.
 //
-// The game: a neon space shooter. Pilot a lone fighter against waves of drones, weavers and
-// tumbling asteroids, catch shield / rapid-fire / spare-hull power-ups as they fall, and bring
-// down the carrier that anchors every fifth wave. Title, play, pause and game-over screens,
-// score, lives, escalating waves, synthesized sound, and a seeded autopilot behind
-// ?shot=start|play|end for the screenshots in screenshots/.
+// The game: a neon space shooter. Pilot a lone fighter against waves of drones, weavers,
+// tumbling asteroids and, from the sixth wave, homing kamikazes that detonate in a blast;
+// catch shield / rapid-fire / spread-shot / spare-hull power-ups as they fall, and bring
+// down the carrier that anchors every fifth wave, rotating its shot patterns as it fights.
+// Title, play, pause and game-over screens, score, lives, escalating waves, synthesized
+// sound, and a seeded autopilot behind ?shot=start|play|boss|kami|end for the screenshots.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
